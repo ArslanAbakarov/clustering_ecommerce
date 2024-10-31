@@ -1,0 +1,1 @@
+rsconnect deploy shiny . --name aabakarov --title clustering_ecommerce

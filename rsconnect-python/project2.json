@@ -1,0 +1,12 @@
+{
+    "https://api.shinyapps.io": {
+        "server_url": "https://api.shinyapps.io",
+        "filename": "/mnt/c/Projects/shinysht/project2",
+        "app_url": "https://aabakarov.shinyapps.io/clustering_ecommerce/",
+        "app_id": 13146008,
+        "app_guid": null,
+        "title": "clustering_ecommerce",
+        "app_mode": "python-shiny",
+        "app_store_version": 1
+    }
+}
