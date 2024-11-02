@@ -3,13 +3,49 @@ from shiny import App, ui, reactive, render
 import pandas as pd
 from pycaret.classification import load_model
 import numpy as np
-from pycaret.clustering import *
+import pickle  # For loading the model
+# from pycaret.clustering import *
 import random
+
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+file = 'models/kmeans_customers_model'
+
 # from pycaret.clustering import predict_model
 
 # Load the model using PyCaret's load_model
-kmeans = load_model('models/kmeans_model')
+# kmeans = load_model('models/kmeans_model')
+# kmeans = load_model('models/kmeans_model_customers_model')
+
+with open(file, 'rb') as file:
+    kmeans = pickle.load(file)
+
+# kmeans = pickle.load(file)
+
 df = pd.read_csv("dataset/ecommerce_20k.csv")
+
+# With Aggregation
+product_features = df.groupby(['user_id', 'product_name']).agg(
+    purchase_count=('order_id', 'count'),
+    reorder_rate=('reordered', 'mean'),
+    avg_days_between=('days_since_prior_order', 'mean'),
+    avg_cart_position=('add_to_cart_order', 'mean')
+).reset_index()
+
+# Customer product matrix
+customer_product_matrix = product_features.pivot(
+    index='user_id',
+    columns='product_name',
+    values='purchase_count'
+).fillna(0)
+
+# customer_product_matrix['Cluster'] = kmeans.fit_predict(customer_product_matrix)
+customer_clusters = kmeans.predict(customer_product_matrix)
+customer_product_matrix['Cluster'] = customer_clusters
+
+cluster_product_preferences = customer_product_matrix.groupby('Cluster').mean()
 
 firstName = ['Sean', 'John', 'George', 'Michael'] 
 lastName = ['Grogg', 'Smith', 'Washington', 'Jackson', 'Daniels'] 
@@ -17,6 +53,31 @@ lastName = ['Grogg', 'Smith', 'Washington', 'Jackson', 'Daniels']
 users_arr = ["152060", "44755", "169119", "162421"]
 user_name = ""
 users_logins = []
+
+# Association Rules for Cluster 0:
+#            antecedents                   consequents   support  confidence  \
+# 0  (baby food formula)                (fresh fruits)  0.022829    0.735471   
+# 1  (baby food formula)            (fresh vegetables)  0.016808    0.541483   
+# 2  (baby food formula)             (packaged cheese)  0.005997    0.193186   
+# 3  (baby food formula)  (packaged vegetables fruits)  0.008559    0.275752   
+# 4  (baby food formula)                      (yogurt)  0.007664    0.246894   
+
+
+# Association Rules for Cluster 1:
+#   antecedents                   consequents   support  confidence      lift
+# 0     (bread)                        (milk)  0.006566    0.106949  1.098158
+# 1     (bread)             (packaged cheese)  0.007257    0.118207  1.250789
+# 2     (bread)  (packaged vegetables fruits)  0.008305    0.135287  0.972958
+# 3     (bread)                      (yogurt)  0.007912    0.128882  1.052540
+# 4    (cereal)                        (milk)  0.005183    0.121474  1.247309
+
+cluster0_rules['baby food formula'] = ['fresh fruits', 'fresh vegetables', 'packaged cheese', 'packaged vegetables fruits', 'yogurt']
+cluster1_rules['bread'] = ['milk', 'packaged cheese', 'packaged vegetables fruits', 'yogurt']
+cluster1_rules['cereal'] = ['milk']
+
+cluster_rules[0] = cluster0_rules
+cluster_rules[1] = cluster1_rules
+
 
 for user_id in users_arr:
     users_logins.append(random.choice(firstName) + " " + random.choice(firstName) + " - " + user_id)
@@ -199,7 +260,7 @@ app_ui = ui.page_fluid(
         # ui.hr(),
         
         ui.div(
-            ui.h1("Select your Profile"),            
+            ui.h1("Select your user Profile"),            
             class_="container introduction",
         ),
     
@@ -220,7 +281,7 @@ app_ui = ui.page_fluid(
                 ui.input_select("user_id", "User", users_logins, selected="No"),
 
                 # Button to trigger prediction
-                ui.input_action_button("predict", "Predict"),
+                ui.input_action_button("predict", "Recommend"),
 
                 # Output the prediction
                 # ui.output_text_verbatim("prediction"),
@@ -262,46 +323,38 @@ def server(input, output, session):
         if input.predict() == 0:
             return "Click 'Predict' to get the result."
 
-        # kmeans_labels = assign_model(kmeans)
-        df_cluster = predict_model(kmeans, data=df)
-        df_cluster = pd.concat([df_cluster['Cluster'], df], axis=1)
-
-        # df_cluster = pd.concat([kmeans_labels['Cluster'], df], axis=1)
-        
         # predicted users cluster
         print(input.user_id())
         
         # get substring after dash
-        target_user_id = input.user_id().split(" - ")[1]
-        
-        
+        target_user_id = input.user_id().split(" - ")[1]        
         target_user_id = int(target_user_id)
         
-        user_data = df[df['user_id'] == target_user_id]
-        print(user_data.head(100))
-        cluster_prediction = predict_model(kmeans, data=user_data)
-        cluster_name = cluster_prediction['Cluster'].values[0]
+        user_data = customer_product_matrix.loc[target_user_id]
         
-        # get related cluster recommendations
-        cluster_data = df_cluster[ df_cluster['Cluster'] == cluster_name ]
+        cluster_number = user_data['Cluster']
         
-        # predicted_data = df_cluster[ cluster_data['Cluster'] == cluster_name ]
+        print("Cluster: " + str(user_data['Cluster']))
+        
+        top_products_per_cluster = {}
+        for cluster in cluster_product_preferences.index:
+            top_products = cluster_product_preferences.loc[cluster].nlargest(16)  # Top 5 products
+            top_products_per_cluster[cluster] = top_products.index.tolist()
 
-        # print("Bought: " + user_data['product_name'].unique())
-        # print(cluster_data.columns)
+        # Print or view top products per cluster
+        for cluster, products in top_products_per_cluster.items():
+            print(f"Top products for Cluster {cluster}: {products}")        
         
-        recommended = cluster_data['product_name'].unique()
-        # recommended = ', '.join(recommended)
-        
-        # print("Recommended product: " + recommended )
+        top_products_per_cluster = top_products_per_cluster[cluster_number]
         
         recommended_html = ""
         
         delivery_lines = ["Get it <b>Tomorrow</b>", "Today by 10:00 PM"]
         shipment = ["FREE Shipping", "FREE One-Day", "$19.99 shipping"]
-        
-        
+                
         delivery_line = random.choice(delivery_lines)
+        
+        recommended = top_products_per_cluster
       
         counter = 0
         for product_name in recommended:
